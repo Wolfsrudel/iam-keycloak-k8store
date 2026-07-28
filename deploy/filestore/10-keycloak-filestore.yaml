@@ -73,6 +73,10 @@ spec:
             - --spi-map-storage--file--dir=/opt/keycloak/data/filestore
             # filestore does not support these features
             - --features-disabled=authorization,admin-fine-grained-authz,organization
+            # filestore's migration manager never writes MIGRATION_MODEL, so without a seed the
+            # theme resources tag falls back to the raw version string, which the resources
+            # route rejects - every admin console asset 404s and the console renders blank
+            - --spi-datastore--file--resources-version-seed=demo
             - --health-enabled=true
           env:
             - name: KC_DB_URL
