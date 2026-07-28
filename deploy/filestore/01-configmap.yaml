@@ -1,0 +1,9 @@
+# Non-secret settings for the filestore demo instance, fed into ${VAR} placeholders the same
+# way as the Secret. Shared with the migrated CRs after the migration.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-demo-config
+  namespace: keycloak
+data:
+  ROOT_URL: https://app.example.com

@@ -61,6 +61,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -244,6 +245,27 @@ class K8sStorageBackendTest {
                 .withName("late")
                 .delete();
         awaitNull(() -> RealmCrStore.read("late"));
+    }
+
+    @Test
+    void clientSpecListenerSeesWatchUpsertsWithDefensiveCopies() {
+        K8sStorageBackend backend = start(true);
+        List<ClientSpec> seen = new CopyOnWriteArrayList<>();
+        backend.setClientSpecListener(seen::add);
+
+        ClientSpec spec = new ClientSpec();
+        spec.setRealm("master");
+        spec.setClientId("svc");
+        spec.setServiceAccountsEnabled(true);
+        client.resource(clientCr("master.svc", spec)).create();
+
+        await(() -> !seen.isEmpty());
+        ClientSpec delivered = seen.get(0);
+        assertEquals("svc", delivered.getClientId());
+        assertEquals(Boolean.TRUE, delivered.isServiceAccountsEnabled());
+        // the listener gets a copy: mutating it must not poison the mirror
+        delivered.setClientId("mutated");
+        assertEquals("svc", ClientCrStore.read("master", "svc").getClientId());
     }
 
     @Test

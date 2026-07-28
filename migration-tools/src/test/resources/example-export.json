@@ -1,0 +1,396 @@
+{
+  "id": "example",
+  "realm": "example",
+  "displayName": "Example",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "bruteForceProtected": true,
+  "failureFactor": 30,
+  "keycloakVersion": "26.7.0",
+  "eventsListeners": ["jboss-logging"],
+  "requiredCredentials": ["password"],
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA1",
+  "otpPolicyDigits": 6,
+  "webAuthnPolicyRpEntityName": "keycloak",
+  "webAuthnPolicySignatureAlgorithms": ["ES256", "RS256"],
+  "browserFlow": "browser",
+  "registrationFlow": "registration",
+  "directGrantFlow": "direct grant",
+  "attributes": {
+    "cibaBackchannelTokenDeliveryMode": "poll",
+    "frontendUrl": "${ROOT_URL}",
+    "retention": "30"
+  },
+  "smtpServer": {
+    "host": "mail.example.com",
+    "from": "kc@example.com",
+    "user": "kc",
+    "password": "${SMTP_PASSWORD}"
+  },
+  "localizationTexts": {
+    "en": {
+      "greeting": "hello"
+    }
+  },
+  "defaultRole": {
+    "id": "default-roles-example",
+    "name": "default-roles-example",
+    "description": "${role_default-roles}",
+    "composite": true,
+    "clientRole": false,
+    "containerId": "example"
+  },
+  "defaultGroups": ["/admins"],
+  "defaultDefaultClientScopes": ["profile", "email"],
+  "defaultOptionalClientScopes": ["offline_access"],
+  "requiredActions": [
+    {
+      "alias": "CONFIGURE_TOTP",
+      "name": "Configure OTP",
+      "providerId": "CONFIGURE_TOTP",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 10,
+      "config": {}
+    }
+  ],
+  "authenticatorConfig": [
+    {
+      "id": "3f6d8a2e-1111-4a4a-9b9b-000000000001",
+      "alias": "review profile config",
+      "config": {
+        "update.profile.on.first.login": "missing"
+      }
+    }
+  ],
+  "authenticationFlows": [
+    {
+      "id": "3f6d8a2e-2222-4a4a-9b9b-000000000001",
+      "alias": "browser",
+      "description": "Browser based authentication",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": true,
+      "authenticationExecutions": [
+        {
+          "authenticator": "auth-cookie",
+          "authenticatorFlow": false,
+          "requirement": "ALTERNATIVE",
+          "priority": 10,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticatorFlow": true,
+          "requirement": "ALTERNATIVE",
+          "priority": 20,
+          "userSetupAllowed": false,
+          "flowAlias": "forms"
+        }
+      ]
+    },
+    {
+      "id": "3f6d8a2e-2222-4a4a-9b9b-000000000002",
+      "alias": "forms",
+      "description": "Username, password, otp and other auth forms.",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": true,
+      "authenticationExecutions": [
+        {
+          "authenticator": "auth-username-password-form",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "userSetupAllowed": false
+        }
+      ]
+    }
+  ],
+  "components": {
+    "org.keycloak.userprofile.UserProfileProvider": [
+      {
+        "id": "3f6d8a2e-3333-4a4a-9b9b-000000000009",
+        "providerId": "declarative-user-profile",
+        "subComponents": {},
+        "config": {}
+      }
+    ],
+    "org.keycloak.keys.KeyProvider": [
+      {
+        "id": "3f6d8a2e-3333-4a4a-9b9b-000000000001",
+        "name": "rsa-generated",
+        "providerId": "rsa-generated",
+        "subComponents": {},
+        "config": {
+          "priority": ["100"]
+        }
+      }
+    ],
+    "org.keycloak.storage.UserStorageProvider": [
+      {
+        "id": "3f6d8a2e-3333-4a4a-9b9b-000000000002",
+        "name": "ldap",
+        "providerId": "ldap",
+        "subComponents": {
+          "org.keycloak.storage.ldap.mappers.LDAPStorageMapper": [
+            {
+              "id": "3f6d8a2e-3333-4a4a-9b9b-000000000003",
+              "name": "username",
+              "providerId": "user-attribute-ldap-mapper",
+              "subComponents": {},
+              "config": {
+                "ldap.attribute": ["uid"]
+              }
+            }
+          ]
+        },
+        "config": {
+          "bindDn": ["cn=admin,dc=example,dc=com"],
+          "bindCredential": ["${LDAP_PASSWORD}"]
+        }
+      }
+    ]
+  },
+  "identityProviders": [
+    {
+      "alias": "corp-oidc",
+      "internalId": "3f6d8a2e-4444-4a4a-9b9b-000000000001",
+      "displayName": "Corporate login",
+      "providerId": "oidc",
+      "enabled": true,
+      "trustEmail": true,
+      "storeToken": false,
+      "firstBrokerLoginFlowAlias": "first broker login",
+      "config": {
+        "clientId": "keycloak-broker",
+        "clientSecret": "${IDP_SECRET}",
+        "tokenUrl": "https://login.example.com/token",
+        "authorizationUrl": "https://login.example.com/auth"
+      }
+    }
+  ],
+  "identityProviderMappers": [
+    {
+      "id": "3f6d8a2e-4444-4a4a-9b9b-000000000002",
+      "name": "email",
+      "identityProviderAlias": "corp-oidc",
+      "identityProviderMapper": "oidc-user-attribute-idp-mapper",
+      "config": {
+        "claim": "email",
+        "user.attribute": "email"
+      }
+    }
+  ],
+  "clientProfiles": {
+    "profiles": [
+      {
+        "name": "custom-profile",
+        "description": "example profile",
+        "executors": [
+          {
+            "executor": "secure-session",
+            "configuration": {}
+          }
+        ]
+      }
+    ],
+    "globalProfiles": [
+      {
+        "name": "built-in-global-profile"
+      }
+    ]
+  },
+  "clientPolicies": {
+    "policies": [],
+    "globalPolicies": []
+  },
+  "scopeMappings": [
+    {
+      "client": "web-app",
+      "roles": ["offline_access"]
+    },
+    {
+      "clientScope": "offline_access",
+      "roles": ["offline_access"]
+    }
+  ],
+  "clientScopeMappings": {
+    "realm-management": [
+      {
+        "client": "web-app",
+        "roles": ["view-users"]
+      }
+    ]
+  },
+  "clients": [
+    {
+      "id": "web-app",
+      "clientId": "web-app",
+      "name": "Web App",
+      "description": "rev ${REVISION}",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${CLIENT_SECRET}",
+      "rootUrl": "${ROOT_URL}",
+      "redirectUris": ["${ROOT_URL}/callback"],
+      "webOrigins": ["+"],
+      "standardFlowEnabled": true,
+      "attributes": {
+        "post.logout.redirect.uris": "+",
+        "note": "${OPT_VAR:-fallback}"
+      },
+      "authenticationFlowBindingOverrides": {
+        "browser": "3f6d8a2e-2222-4a4a-9b9b-000000000001"
+      },
+      "defaultClientScopes": ["profile", "email"],
+      "optionalClientScopes": ["offline_access"],
+      "protocolMappers": [
+        {
+          "id": "3f6d8a2e-5555-4a4a-9b9b-000000000001",
+          "name": "audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "web-app",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "id": "service",
+      "clientId": "service",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "serviceAccountsEnabled": true,
+      "authorizationSettings": {
+        "allowRemoteResourceManagement": false,
+        "resources": [
+          {
+            "name": "Default Resource"
+          }
+        ]
+      }
+    },
+    {
+      "id": "realm-management",
+      "clientId": "realm-management",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": true
+    }
+  ],
+  "clientScopes": [
+    {
+      "id": "offline_access",
+      "name": "offline_access",
+      "description": "OpenID Connect built-in scope: offline_access",
+      "protocol": "openid-connect",
+      "attributes": {
+        "consent.screen.text": "${offlineAccessScopeConsentText}"
+      }
+    },
+    {
+      "id": "profile",
+      "name": "profile",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true"
+      },
+      "protocolMappers": [
+        {
+          "id": "3f6d8a2e-5555-4a4a-9b9b-000000000002",
+          "name": "full name",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-full-name-mapper",
+          "consentRequired": false,
+          "config": {
+            "id.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "id": "email",
+      "name": "email",
+      "protocol": "openid-connect"
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "id": "admin",
+        "name": "admin",
+        "description": "Realm admin",
+        "composite": true,
+        "clientRole": false,
+        "containerId": "example",
+        "composites": {
+          "client": {
+            "realm-management": ["view-users"]
+          }
+        },
+        "attributes": {
+          "tier": ["gold"]
+        }
+      },
+      {
+        "id": "offline_access",
+        "name": "offline_access",
+        "description": "${role_offline-access}",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "example"
+      }
+    ],
+    "client": {
+      "web-app": [
+        {
+          "id": "web-app:editor",
+          "name": "editor",
+          "description": "May edit things",
+          "composite": false,
+          "clientRole": true,
+          "containerId": "web-app"
+        }
+      ],
+      "realm-management": [
+        {
+          "id": "realm-management:view-users",
+          "name": "view-users",
+          "composite": false,
+          "clientRole": true,
+          "containerId": "realm-management"
+        }
+      ]
+    }
+  },
+  "groups": [
+    {
+      "id": "admins",
+      "name": "admins",
+      "path": "/admins",
+      "attributes": {
+        "office": ["hq"]
+      },
+      "realmRoles": ["admin"],
+      "subGroups": [
+        {
+          "id": "admins:ops",
+          "name": "ops",
+          "path": "/admins/ops",
+          "clientRoles": {
+            "web-app": ["editor"]
+          },
+          "subGroups": []
+        }
+      ]
+    }
+  ]
+}

@@ -66,19 +66,19 @@ API server and pods need no coordination - sequence diagrams and the full design
 ## Quickstart (local)
 
 ```bash
-scripts/kind-up.sh      # 2-worker kind cluster + local registry (needed by the tests too)
-mvn install             # build + unit and integration tests
+scripts/kind-up.sh      # 2-worker kind cluster + local registry, Keycloak ports published on the host
 scripts/deploy.sh       # CRDs + postgres + 2 Keycloak replicas (admin/admin), write mode
-kubectl -n keycloak port-forward svc/keycloak 8080:8080   # then open http://localhost:8080 (admin/admin)
+open http://localhost:8080                                # admin console (admin/admin)
 kubectl -n keycloak get keycloakrealms,keycloakclients    # the master realm Keycloak just materialized
 scripts/kind-down.sh
 ```
 
-To reach the deployed Keycloak on the host without the port-forward, recreate the cluster with
-`KIND_PUBLISH_KEYCLOAK_PORTS=1 scripts/kind-up.sh` - that publishes the Service NodePorts so
-`http://localhost:8080` (console) and `http://localhost:9000` (health/metrics) hit it directly.
-It is opt-in because binding those host ports collides with the integration test server, so don't
-combine it with `mvn install` in the same run.
+The default cluster publishes the Service NodePorts on the host: `http://localhost:8080`
+(console), `http://localhost:9000` (health/metrics) and `http://localhost:8081` (the filestore
+demo instance, see [docs/DEMO.md](docs/DEMO.md)). To run the integration tests
+(`mvn install` / `mvn test -pl tests`) against the cluster, create it with
+`KIND_PUBLISH_KEYCLOAK_PORTS=0 scripts/kind-up.sh` instead - the embedded test server is
+hardwired to `localhost:8080` and collides with the published ports (CI does the same).
 
 Write mode materializes everything an admin does as CRs (useful for bootstrapping: click it
 together in the console, then `kubectl get ... -o yaml` becomes your GitOps source). Read-only
@@ -89,6 +89,10 @@ bootstrapped master realm and no way to add more through the console.
 
 `scripts/benchmark.sh` runs a k8store-vs-vanilla load-test comparison against this cluster
 using Keycloak's official keycloak-benchmark tool; results in [docs/BENCHMARK.md](docs/BENCHMARK.md).
+
+[docs/DEMO.md](docs/DEMO.md) has two guided walkthroughs on this cluster: a Secret-backed client
+served through `valuesFrom` references, and a full filestore-to-k8store migration
+(`scripts/deploy-filestore.sh` + `scripts/migrate-filestore.sh`).
 
 ## Deploying elsewhere
 
@@ -251,10 +255,77 @@ Two things happen on a Keycloak version bump, and only one of them is automatic:
   with the Keycloak version that wrote it, and the server warns at boot about CRs stamped by an
   older version - that's your prompt to check the notes.
 
+## Migrating an existing instance
+
+`migration-tools` converts a standard Keycloak realm export into per-kind CR YAML you can review,
+version-control and `kubectl apply`. It works with an export from any store; the primary path is
+migrating from [keycloak-extension-filestore](https://github.com/opdt/keycloak-extension-filestore).
+The shaded jar is attached to GitHub releases and published as
+`io.github.dominikschlosser:keycloak-k8store-migration-tools`.
+
+1. **Export the configuration** with a local Keycloak running against the existing setup, e.g.
+   for filestore with the file directory mounted. **Leave the environment variables referenced by
+   `${VAR}` placeholders unset**: filestore then serves the placeholder text verbatim, so it
+   survives into the export and later into the CRs instead of getting substituted away.
+
+   ```sh
+   kc.sh export --dir /tmp/export --users skip \
+     --features=stateless \
+     --spi-datastore--provider=file \
+     --spi-map-storage--file--dir=/path/to/filestore-files
+   ```
+
+   Users are skipped on purpose: users, sessions and other dynamic data stay in the database and
+   k8store keeps serving them from there. The tool preserves exported entity ids, so database
+   rows referencing them (role mappings, group memberships, consents, federation links) stay
+   valid across the switch.
+
+2. **Convert the export** (a `kc.sh export --dir` directory, or a single-file export):
+
+   ```sh
+   java -jar keycloak-k8store-migration-tools.jar /tmp/export ./crs
+   ```
+
+   The output is one `<realm>.yaml` per realm plus
+   `<realm>/{clients,client-scopes,roles,groups}/*.yaml`, and a `migration-report.txt` listing
+   every decision that needs review. `--realm <name>` selects single realms;
+   `--areas realm,client,...` limits the emitted kinds to the areas you actually serve from CRs
+   (an export contains every config area, even ones you plan to keep in the database).
+
+3. **Optionally migrate Secret/ConfigMap references** (`--migrate-references`). The tool reads
+   the container environment of the old deployment and translates placeholders into `valuesFrom`
+   entries: a `${VAR}` fed by a `secretKeyRef`/`configMapKeyRef` (directly or via `envFrom`)
+   becomes the same reference on the CR, with the placeholder rewritten to `${<key>}` when the
+   variable name and the object key differ; a plain-value env var becomes an inline literal
+   entry; a `${VAR:-default}` without any source gets its default baked in (what filestore
+   resolved with the variable unset); anything unmatched is left verbatim and reported.
+
+   ```sh
+   java -jar keycloak-k8store-migration-tools.jar /tmp/export ./crs \
+     --migrate-references --namespace keycloak --deployment keycloak
+   ```
+
+   The generated references need `--spi-datastore--k8store--resolve-references=true` and the
+   referenced Secrets/ConfigMaps present in the watched namespace (see
+   [references](#secret-configmap-and-literal-references)).
+
+4. **Review and apply.** Go through `migration-report.txt`, commit the CRs, `kubectl apply` them
+   and start Keycloak with k8store selected. Users, sessions and service accounts keep working
+   when the new deployment uses the same database - only the config store is swapped.
+
+A guided end-to-end run of this flow on a local kind cluster - including a filestore demo
+instance to migrate from (`scripts/deploy-filestore.sh`, `scripts/migrate-filestore.sh`) - is in
+[docs/DEMO.md](docs/DEMO.md).
+
+Not migrated: users and sessions (they stay in the database), client initial access tokens
+(exports do not carry them), authorization data (`authorizationSettings` is reported and
+dropped), organizations.
+
 ## Known limitations
 
 - Fine-grained admin permissions v2 needs write mode.
-- Switching an area on existing data is an unassisted migration event.
+- Switching an area on existing data means re-authoring that data as CRs;
+  `migration-tools` (above) automates the export-to-CR conversion.
 - Realm renames don't rewrite child CRs.
 - Areas can't be split from their prerequisites: an area whose data lives in another area's CR
   forces that area onto CRs too (`organization` pulls in `group`, `identity-provider`, `realm`;

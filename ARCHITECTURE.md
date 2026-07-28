@@ -135,6 +135,13 @@ the model layer here is an independent implementation on Keycloak's representati
   federation-aware `UserStorageManager` with the CR provider pinned as `userLocalStorage()`, so
   **LDAP/Kerberos federation works with CR-backed users** (the CR provider implements
   `UserCredentialStore`, credentials go through the standard `UserCredentialManager`).
+* **Service accounts of CR-authored clients are materialized by the store.** A service account
+  is a *user* (`service-account-<clientId>`), which Keycloak only creates on its own
+  client-write paths - paths a `kubectl apply`d client never runs. `ServiceAccountEnsurer`
+  sweeps the client mirror once the session factory is up (post-migration event) and follows the
+  watch afterwards, creating the missing user (or repointing a stale service-account link after
+  a store migration changed the client id). Users are dynamic data, so this works in read-only
+  mode too - it is what makes `client_credentials` work for clients that exist purely as CRs.
 * **Per-area providers** are `@AutoService`-registered under id `k8store` and gate `isSupported()`
   on their area. `isSupported()` is evaluated at Keycloak *augmentation*, so with a pre-built
   (`--optimized`) image the `areas` option must be set at `kc.sh build` time; the `deploy/`
@@ -354,8 +361,9 @@ crds/          committed, generated CRD manifests (CI fails on drift)
 deploy/        Kubernetes manifests + Dockerfile
 core/          provider jar: specs + CR classes, adapters, providers, backend, datastore
 crd-tools/     CRD schema diff / check-cluster / apply CLI
+migration-tools/  realm-export -> CR YAML migration CLI (see README, "Migrating an existing instance")
 tests/         test-framework integration tests (embedded + remote)
-scripts/       kind-up, deploy, kind-down, update-crds, crd-tools, e2e, benchmark
+scripts/       kind-up, deploy, deploy-filestore, migrate-filestore, kind-down, update-crds, crd-tools, e2e, benchmark
 docs/          BENCHMARK.md - k8store-vs-vanilla load-test results (scripts/benchmark.sh)
 ```
 

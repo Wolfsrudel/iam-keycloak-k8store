@@ -1,0 +1,88 @@
+# The demo realm, imported on first boot (--import-realm). The ${VAR} placeholders land verbatim
+# in the filestore files (import does not substitute); at runtime filestore substitutes them from
+# the container environment, which feeds them from the Secret/ConfigMap in this directory.
+# URL-typed client fields stay literal - Keycloak's importer validates them as URLs, so a
+# placeholder there would be rejected.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-filestore-import
+  namespace: keycloak
+data:
+  demo-realm.json: |
+    {
+      "realm": "demo",
+      "enabled": true,
+      "displayName": "Migration Demo",
+      "registrationAllowed": false,
+      "bruteForceProtected": true,
+      "attributes": {
+        "homepage": "${ROOT_URL}"
+      },
+      "smtpServer": {
+        "host": "mail.example.com",
+        "from": "keycloak@example.com",
+        "auth": "true",
+        "user": "keycloak",
+        "password": "${SMTP_PASSWORD}"
+      },
+      "clients": [
+        {
+          "clientId": "web-app",
+          "name": "Demo Web App",
+          "description": "Homepage: ${ROOT_URL}",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": false,
+          "clientAuthenticatorType": "client-secret",
+          "secret": "${CLIENT_SECRET}",
+          "standardFlowEnabled": true,
+          "serviceAccountsEnabled": true,
+          "redirectUris": ["http://localhost:8081/*"],
+          "defaultClientScopes": ["profile", "email"],
+          "optionalClientScopes": ["offline_access"]
+        }
+      ],
+      "roles": {
+        "realm": [
+          {
+            "name": "demo-admin",
+            "description": "Administers the demo app",
+            "composite": true,
+            "composites": {
+              "client": {
+                "web-app": ["editor"]
+              }
+            }
+          }
+        ],
+        "client": {
+          "web-app": [
+            {
+              "name": "editor",
+              "description": "May edit demo content"
+            }
+          ]
+        }
+      },
+      "groups": [
+        {
+          "name": "team",
+          "realmRoles": ["demo-admin"],
+          "subGroups": [
+            {
+              "name": "ops",
+              "clientRoles": {
+                "web-app": ["editor"]
+              }
+            }
+          ]
+        }
+      ],
+      "scopeMappings": [
+        {
+          "client": "web-app",
+          "roles": ["demo-admin"]
+        }
+      ]
+    }

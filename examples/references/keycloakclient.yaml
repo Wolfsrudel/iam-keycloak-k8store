@@ -17,6 +17,9 @@ spec:
   publicClient: false
   clientAuthenticatorType: client-secret
   standardFlowEnabled: true
+  # the store materializes the service-account user for CR-authored clients (it is dynamic user
+  # data, not client configuration), so a client_credentials grant works even in read-only mode
+  serviceAccountsEnabled: true
   # ${client-secret} pairs with secretKeyRef.key below
   secret: ${client-secret}
   # ${ROOT_URL} pairs with configMapKeyRef.key below, here and inside the redirect URI

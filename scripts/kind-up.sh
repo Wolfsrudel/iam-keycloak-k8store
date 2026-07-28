@@ -23,14 +23,17 @@ else
   echo "Local registry ${REG_NAME} already running"
 fi
 
-# Optionally publish the keycloak Service's NodePorts (deploy/30-keycloak.yaml) on the host so
-# http://localhost:8080 reaches the DEPLOYED Keycloak with no port-forward. OPT-IN
-# (KIND_PUBLISH_KEYCLOAK_PORTS=1) because binding host 8080/9000 collides with the embedded
-# integration test server, which is hardwired to localhost:8080/9000 - publishing them by
-# default breaks `mvn install` and the CI integration job (Port already bound: 8080). e2e.sh
-# port-forwards these ports itself, so the e2e flow does not need the mapping either.
+# Publish the Keycloak NodePorts on the host (default), so the deployed instances are reachable
+# without a port-forward:
+#   http://localhost:8080  k8store Keycloak (deploy/30-keycloak.yaml, nodePort 30080)
+#   http://localhost:9000  its management endpoint (health/metrics, nodePort 30900)
+#   http://localhost:8081  the filestore demo Keycloak (deploy/filestore/, nodePort 30081)
+# OPT OUT with KIND_PUBLISH_KEYCLOAK_PORTS=0 when running the integration tests against this
+# cluster: the embedded test server is hardwired to localhost:8080/9000, and the published host
+# ports collide with it (Port already bound: 8080). Same for e2e.sh, which port-forwards
+# 8080/9000 itself. CI creates its clusters with the opt-out.
 CONTROL_PLANE="- role: control-plane"
-if [ "${KIND_PUBLISH_KEYCLOAK_PORTS:-}" = "1" ]; then
+if [ "${KIND_PUBLISH_KEYCLOAK_PORTS:-1}" != "0" ]; then
   # NodePorts answer on every node, so binding them on the control-plane still routes to the
   # worker pods.
   CONTROL_PLANE="${CONTROL_PLANE}
@@ -40,6 +43,9 @@ if [ "${KIND_PUBLISH_KEYCLOAK_PORTS:-}" = "1" ]; then
     protocol: TCP
   - containerPort: 30900
     hostPort: 9000
+    protocol: TCP
+  - containerPort: 30081
+    hostPort: 8081
     protocol: TCP"
 fi
 

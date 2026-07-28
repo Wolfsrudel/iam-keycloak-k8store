@@ -79,15 +79,11 @@ import io.github.dominikschlosser.k8store.kubernetes.crd.KeycloakUserVerifiableC
 import io.github.dominikschlosser.k8store.kubernetes.references.ConfigMapMirror;
 import io.github.dominikschlosser.k8store.kubernetes.references.SecretMirror;
 import io.github.dominikschlosser.k8store.kubernetes.references.ValueReferenceResolver;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -95,6 +91,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -169,6 +166,19 @@ public final class K8sStorageBackend implements AutoCloseable {
     private final Map<Class<?>, KindState<?, ?>> kinds = new HashMap<>();
     private final List<SharedIndexInformer<?>> informers = new ArrayList<>();
     private ScheduledExecutorService reconciler;
+
+    /**
+     * Notified with a defensive copy of every client spec that lands in the mirror (watch adds,
+     * updates and reconcile repairs). Registered after {@link #start()} has synced the informers,
+     * so the initial inventory does not pass through it - consumers sweep the mirror themselves
+     * when they come up (the service-account materialization does so on the post-migration
+     * event). Runs on the informer thread: implementations must be quick and must not throw.
+     */
+    private volatile Consumer<ClientSpec> clientSpecListener;
+
+    public void setClientSpecListener(Consumer<ClientSpec> listener) {
+        this.clientSpecListener = listener;
+    }
 
     /**
      * Reference resolution on the read path, or {@code null} when {@code resolve-references} is
@@ -1288,6 +1298,10 @@ public final class K8sStorageBackend implements AutoCloseable {
             refs.put(
                     key(realmId, idFn.apply(spec)),
                     new CrRef(cr.getMetadata().getName(), cr.getMetadata().getNamespace()));
+            Consumer<ClientSpec> listener = clientSpecListener;
+            if (listener != null && spec instanceof ClientSpec clientSpec) {
+                listener.accept(COPY_MAPPER.convertValue(clientSpec, ClientSpec.class));
+            }
         }
 
         /** (realmId, id) key of a CR, or null if it has no resolvable identity. */
@@ -1572,67 +1586,12 @@ public final class K8sStorageBackend implements AutoCloseable {
 
     // ------------------------------------------------------------------ naming
 
-    /**
-     * Deterministic DNS-1123 name for a CR written by Keycloak. A realm CR is named {@code <id>};
-     * a scoped CR {@code <realm>.<id>}, two dot-separated DNS-1123 labels. A hash suffix is appended
-     * only when {@link #dnsLabel} actually changed a component: {@code dnsLabel} is lossy (it folds
-     * arbitrary ids to DNS characters and truncates), so two entities that sanitize alike would
-     * otherwise collide on one name; the hash over the exact {@code (realmId, id)} pair keeps them
-     * apart. When every component survives {@code dnsLabel} unchanged there is nothing to
-     * disambiguate - distinct clean pairs already yield distinct names - so the readable name is
-     * used as-is (e.g. {@code master.web-origins}).
-     */
+    /** See {@link CrNaming#crName}; kept here as the backend's naming entry point. */
     static String crName(Class<?> crClass, String realmId, String id) {
-        if (crClass == KeycloakRealmCr.class) {
-            String label = dnsLabel(id);
-            return label.equals(id) ? label : label + "-" + shortHash(id);
-        }
-        String realmLabel = dnsLabel(realmId);
-        String idLabel = dnsLabel(id);
-        String name = realmLabel + "." + idLabel;
-        if (realmLabel.equals(realmId) && idLabel.equals(id)) {
-            return name;
-        }
-        return name + "-" + shortHash(key(realmId, id));
-    }
-
-    /**
-     * One DNS-1123 label from an arbitrary string: lowercase, runs of non-alphanumeric characters
-     * become a single hyphen, edges trimmed, capped short enough to leave room for a
-     * {@code "-<hash>"} suffix within the 63-character label limit.
-     */
-    private static String dnsLabel(String raw) {
-        String label =
-                raw.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "-").replaceAll("^-+|-+$", "");
-        if (label.length() > 54) {
-            label = label.substring(0, 54).replaceAll("-+$", "");
-        }
-        return label.isEmpty() ? "x" : label;
+        return CrNaming.crName(crClass, realmId, id);
     }
 
     private static String sanitizeLabel(String value) {
-        String sanitized = value.replaceAll("[^A-Za-z0-9._-]", "-")
-                // label values must start and end alphanumeric (e.g. the "@global" pseudo-realm)
-                .replaceAll("^[^A-Za-z0-9]+|[^A-Za-z0-9]+$", "");
-        if (sanitized.isEmpty()) {
-            sanitized = "x";
-        }
-        if (sanitized.length() > 63) {
-            sanitized = sanitized.substring(0, 55) + "-" + shortHash(value).substring(0, 7);
-        }
-        return sanitized;
-    }
-
-    private static String shortHash(String value) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < 4; i++) {
-                sb.append(String.format("%02x", digest[i]));
-            }
-            return sb.toString();
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
+        return CrNaming.labelValue(value);
     }
 }

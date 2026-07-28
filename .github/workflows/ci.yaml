@@ -13,9 +13,11 @@
 #     and a local registry on localhost:5001; scripts/kind-up.sh creates both.
 #   - kubectl, helm and docker are preinstalled on ubuntu runners; only kind is
 #     installed here (pinned below via KIND_VERSION).
-#   - scripts/e2e.sh port-forwards 8080/9000 on the runner; both are free on
-#     stock ubuntu runners.
-#   - Run locally: scripts/kind-up.sh && scripts/deploy.sh --build && scripts/e2e.sh
+#   - scripts/e2e.sh port-forwards 8080/9000 on the runner, and the embedded
+#     integration server binds localhost:8080 - so CI creates its clusters with
+#     KIND_PUBLISH_KEYCLOAK_PORTS=0 (kind-up publishes the ports by default).
+#   - Run locally: KIND_PUBLISH_KEYCLOAK_PORTS=0 scripts/kind-up.sh &&
+#     scripts/deploy.sh --build && scripts/e2e.sh
 
 name: CI
 
@@ -54,8 +56,8 @@ jobs:
       - name: Build (skip tests)
         run: mvn -B -ntp install -DskipTests
 
-      - name: Unit tests (core, crd-tools)
-        run: mvn -B -ntp test -pl core -pl crd-tools
+      - name: Unit tests (core, crd-tools, migration-tools)
+        run: mvn -B -ntp test -pl core -pl crd-tools -pl migration-tools
 
       # The CRDs committed under crds/ must match what the current Keycloak
       # entity model generates. Drift here usually means upstream
@@ -96,9 +98,13 @@ jobs:
           kind version
 
       # Creates the kind cluster (context kind-k8store) and the local
-      # registry on localhost:5001. Idempotent.
+      # registry on localhost:5001. Idempotent. The host-port publishing is
+      # opted out: the embedded test server is hardwired to localhost:8080,
+      # and e2e.sh port-forwards 8080/9000 itself.
       - name: Create kind cluster
         run: ./scripts/kind-up.sh
+        env:
+          KIND_PUBLISH_KEYCLOAK_PORTS: "0"
 
       - name: Build (skip tests)
         run: mvn -B -ntp install -DskipTests
@@ -142,8 +148,12 @@ jobs:
           sudo install -m 0755 "${RUNNER_TEMP}/kind" /usr/local/bin/kind
           kind version
 
+      # Host-port publishing opted out: e2e.sh port-forwards 8080/9000 itself,
+      # and the published ports would collide with that.
       - name: Create kind cluster
         run: ./scripts/kind-up.sh
+        env:
+          KIND_PUBLISH_KEYCLOAK_PORTS: "0"
 
       # e2e.sh runs `mvn -pl tests test`, which resolves the reactor siblings
       # (parent, core, crd-tools) from the local repository - install them

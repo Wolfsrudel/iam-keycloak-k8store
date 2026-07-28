@@ -26,6 +26,7 @@
   <modules>
     <module>core</module>
     <module>crd-tools</module>
+    <module>migration-tools</module>
     <module>tests</module>
   </modules>
   <scm>

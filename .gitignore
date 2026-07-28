@@ -10,3 +10,4 @@ dependency-reduced-pom.xml
 .env.test
 .benchmark-cache/
 benchmark-results/
+migrated-crs/

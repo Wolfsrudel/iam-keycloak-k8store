@@ -1,0 +1,154 @@
+# A Keycloak instance using the filestore extension - the migration demo's "existing
+# installation". Single replica, dev mode, config in filestore files (emptyDir, seeded by the
+# init container), users/sessions in the SAME postgres the k8store deployment uses - which is
+# what makes the migration realistic: swapping the config store leaves the database untouched,
+# so the bootstrap admin and the clients' service accounts keep working. Deploy this on a fresh
+# cluster (before the k8store deployment ever bootstrapped the database): two instances
+# bootstrapping the same database collide on the admin user.
+# scripts/migrate-filestore.sh copies the files out and converts them to CRs.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak-filestore
+  namespace: keycloak
+  labels:
+    app: keycloak-filestore
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak-filestore
+  template:
+    metadata:
+      labels:
+        app: keycloak-filestore
+    spec:
+      # The realm is seeded by an init container WITHOUT the placeholder env vars: Keycloak's
+      # importer substitutes ${VAR} from the environment, so importing in the main container
+      # would bake the real values into the files. With the variables unset the placeholders
+      # land verbatim, like in a hand-authored filestore. Runs on every pod start and overwrites
+      # the demo realm files, so console edits do not survive a restart (fine for a demo).
+      initContainers:
+        - name: seed-realm
+          image: localhost:5001/keycloak-filestore:dev
+          imagePullPolicy: Always
+          args:
+            - import
+            - --file=/import/demo-realm.json
+            - --db=postgres
+            - --features=stateless
+            - --spi-datastore--provider=file
+            - --spi-map-storage--file--dir=/opt/keycloak/data/filestore
+            - --features-disabled=authorization,admin-fine-grained-authz,organization
+          env:
+            # the same database the k8store deployment uses: users - including the bootstrap
+            # admin and the clients' service accounts created by this import - live there and
+            # carry over unchanged when the config store is swapped to k8store
+            - name: KC_DB_URL
+              value: jdbc:postgresql://postgres:5432/keycloak
+            - name: KC_DB_USERNAME
+              value: keycloak
+            - name: KC_DB_PASSWORD
+              value: keycloak
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              value: admin
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              value: admin
+          volumeMounts:
+            - name: data
+              mountPath: /opt/keycloak/data
+            - name: filestore
+              mountPath: /opt/keycloak/data/filestore
+            - name: import
+              mountPath: /import
+      containers:
+        - name: keycloak
+          image: localhost:5001/keycloak-filestore:dev
+          imagePullPolicy: Always
+          args:
+            - start-dev
+            - --db=postgres
+            - --features=stateless
+            - --spi-datastore--provider=file
+            - --spi-map-storage--file--dir=/opt/keycloak/data/filestore
+            # filestore does not support these features
+            - --features-disabled=authorization,admin-fine-grained-authz,organization
+            - --health-enabled=true
+          env:
+            - name: KC_DB_URL
+              value: jdbc:postgresql://postgres:5432/keycloak
+            - name: KC_DB_USERNAME
+              value: keycloak
+            - name: KC_DB_PASSWORD
+              value: keycloak
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              value: admin
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              value: admin
+            # The placeholder sources: filestore substitutes ${CLIENT_SECRET}, ${SMTP_PASSWORD}
+            # and ${ROOT_URL} in its files from these variables at file-parse time.
+            # scripts/migrate-filestore.sh reads exactly these env sources to generate the
+            # equivalent valuesFrom references on the migrated CRs.
+            - name: CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-demo-secrets
+                  key: CLIENT_SECRET
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-demo-secrets
+                  key: SMTP_PASSWORD
+            - name: ROOT_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: keycloak-demo-config
+                  key: ROOT_URL
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: management
+              containerPort: 9000
+          volumeMounts:
+            - name: data
+              mountPath: /opt/keycloak/data
+            # filestore expects its directory to exist; a dedicated mount creates it
+            - name: filestore
+              mountPath: /opt/keycloak/data/filestore
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 9000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 36
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: filestore
+          emptyDir: {}
+        - name: import
+          configMap:
+            name: keycloak-filestore-import
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-filestore
+  namespace: keycloak
+  labels:
+    app: keycloak-filestore
+# NodePort 30081 is published as host port 8081 by the default kind config
+# (scripts/kind-up.sh), so http://localhost:8081 reaches this instance directly.
+spec:
+  type: NodePort
+  selector:
+    app: keycloak-filestore
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      nodePort: 30081
+    - name: management
+      port: 9000
+      targetPort: 9000

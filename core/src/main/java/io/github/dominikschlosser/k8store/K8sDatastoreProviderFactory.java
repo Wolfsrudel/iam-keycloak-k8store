@@ -17,12 +17,14 @@
 package io.github.dominikschlosser.k8store;
 
 import com.google.auto.service.AutoService;
+import io.github.dominikschlosser.k8store.client.ServiceAccountEnsurer;
 import io.github.dominikschlosser.k8store.kubernetes.K8sStorageBackend;
 import io.github.dominikschlosser.k8store.kubernetes.K8sStoreConfig;
 import org.keycloak.Config;
 import org.keycloak.common.Profile;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
+import org.keycloak.models.utils.PostMigrationEvent;
 import org.keycloak.storage.DatastoreProvider;
 import org.keycloak.storage.DatastoreProviderFactory;
 import org.keycloak.storage.datastore.DefaultDatastoreProviderFactory;
@@ -75,7 +77,19 @@ public class K8sDatastoreProviderFactory implements DatastoreProviderFactory {
         }
         // Fail fast at boot: connect to the Kubernetes API and sync all informer caches so the
         // node never serves partial configuration.
-        K8sStorageBackend.get();
+        K8sStorageBackend backend = K8sStorageBackend.get();
+        if (K8sStoreConfig.isAreaEnabled(K8sStoreConfig.Area.CLIENT)) {
+            // Service accounts are users, not client configuration: Keycloak only creates them on
+            // its own client-write paths, which a CR-authored client never runs. Sweep once the
+            // session factory is fully booted (post-migration), then follow the watch.
+            ServiceAccountEnsurer ensurer = new ServiceAccountEnsurer(factory);
+            backend.setClientSpecListener(ensurer::onClientSpec);
+            factory.register(event -> {
+                if (event instanceof PostMigrationEvent) {
+                    ensurer.activate();
+                }
+            });
+        }
     }
 
     @Override

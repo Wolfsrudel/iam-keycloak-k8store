@@ -1,6 +1,6 @@
 name: Release
 
-# Cutting a v* tag publishes core + crd-tools to Maven Central and creates a GitHub release.
+# Cutting a v* tag publishes core + crd-tools + migration-tools to Maven Central and creates a GitHub release.
 # Integration and e2e tests need a kind cluster, so they run in ci.yaml on push/PR. This workflow
 # runs the core unit tests as a sanity check, then publishes.
 #
@@ -44,10 +44,10 @@ jobs:
       - name: Core unit tests
         run: mvn -B -ntp test -pl core
 
-      # The parent (.) must be published too: the core/crd-tools POMs inherit their metadata and
+      # The parent (.) must be published too: the module POMs inherit their metadata and
       # dependency versions from it, and Maven Central validates each POM against the parent.
       - name: Publish to Maven Central
-        run: mvn -B -ntp deploy -Prelease -DskipTests -pl .,core,crd-tools
+        run: mvn -B -ntp deploy -Prelease -DskipTests -pl .,core,crd-tools,migration-tools
         env:
           CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
           CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
@@ -64,4 +64,5 @@ jobs:
           files: |
             core/target/keycloak-k8store-*.jar
             crd-tools/target/keycloak-k8store-crd-tools-*.jar
+            migration-tools/target/keycloak-k8store-migration-tools-*.jar
             keycloak-k8store-crds.yaml

@@ -44,6 +44,10 @@ public final class ClientCrStore {
         return STORE.allInRealm(realmId);
     }
 
+    public static List<ClientSpec> all() {
+        return STORE.readAll();
+    }
+
     public static ClientSpec save(ClientSpec spec) {
         return STORE.save(spec);
     }
